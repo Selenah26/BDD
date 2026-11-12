@@ -1,0 +1,135 @@
+
+/*Tarea 1*/
+
+/*Tarea 1.1*/
+
+/*Creación de cuentas base: Crea un usuario llamado gestor_tienda que
+únicamente pueda conectarse desde la máquina local con la contraseña segura (explica qué requisitos estableces para que la contraseña sea segura). Crea un segundo usuario llamado auditor_externo que pueda conectarse desde cualquier dirección IP de la red.*/
+CREATE USER 'gestor_tienda'@'localhost' IDENTIFIED BY 'as1r20:26';
+CREATE USER 'auditor_externo'@'%' IDENTIFIED BY 'aud1tor20:24';
+
+/*Para crear una contraseña segura es necesario poner identified by y la contraseña despues, le he puesto contraseña alos dos por qe no tendria sentido crear un usuario sin segurdad al que todos pueden acceder */
+
+/*Tarea 1.2*/
+
+/*Directiva de caducidad de credenciales: Configura el usuario auditor_externo
+para que su contraseña caduque obligatoriamente cada 30 días, obligándole a
+reestablecerla pasado dicho plazo para evitar vulnerabilidades por credenciales
+estáticas*/
+ALTER USER 'auditor_externo'@'%' PASSWORD EXPIRE INTERVAL 30 DAY;
+
+/*Tarea 1.3*/
+
+/*Directiva de control de sesión: Establece una restricción técnica para que las
+conexiones activas del usuario gestor_tienda no puedan superar 1 hora de
+inactividad o tiempo de vida activo, forzando la reautenticación tras dicho periodo.*/
+SET GLOBAL wait_timeout = 3600;
+
+/*Lo he puesto para todos los usuarios por que para uno en especifico no se puede*/
+
+/*Tarea 2*/
+
+/*Tarea 2.1*/
+
+/*Definición de rol operativo: Crea un rol denominado rol_consultor.*/
+CREATE ROLE 'rol_consultor';
+
+/*Tarea 2.2*/
+
+/*Concesión de privilegios al rol: Otorga al rol rol_consultor permisos de solo
+lectura sobre toda la base de datos tienda_informatica.*/
+GRANT SELECT ON tienda_informatica.* TO 'rol_consultor'; 
+
+/*Tarea 2.3*/
+
+/* Asignación y rol por defecto: Asigna el rol rol_consultor al usuario
+auditor_externo y configúralo explícitamente como rol por defecto para su sesión de trabajo.*/
+GRANT 'rol_consultor' TO 'auditor_externo'@'%';
+ALTER USER 'auditor_externo'@'%' DEFAULT ROLE 'rol_consultor';
+
+/*Tarea 3*/
+
+/*Tarea 3.1*/
+/*Creación de la vista de enmascaramiento: Crea una vista llamada
+v_tecnicos_activos que muestre únicamente el identificador, el nombre y la especialidad de los técnicos, ocultando por completo la columna de salarios.*/
+CREATE VIEW tienda_informatica.v_tecnicos_activos AS
+SELECT id_tecnico, nombre, especialidad
+FROM tienda_informatica.tecnicos;
+
+/*Tarea 3.2*/
+/*Privilegio granular: Concede al usuario gestor_tienda permisos exclusivos de consulta sobre dicha vista v_tecnicos_activos.*/
+GRANT SELECT ON tienda_informatica.v_tecnicos_activosTO
+'gestor_tienda'@'localhost';
+
+/*Tarea 3.3*/
+/*Prueba de denegación: Comprueba y documenta qué ocurre si el usuario gestor_tienda intenta consultar directamente la tabla base tecnicos.*/
+/* Se abre una sesión como gestor_tienda:
+   mysql -u gestor_tienda -p */
+
+SELECT * FROM tienda_informatica.v_tecnicos_activos;
+/* Resultado: OK, devuelve id_tecnico, nombre y especialidad */
+
+SELECT * FROM tienda_informatica.tecnicos;
+/* Resultado: ERROR 1142 (42000): SELECT command denied to user
+   'gestor_tienda'@'localhost' for table 'tecnicos' */
+
+/*Tarea 4*/
+
+/*Tarea 4.1*/
+/*Vista con restricción de dominio: Crea una vista llamada v_articulos_gama_baja basada en la tabla articulos que filtre aquellos productos cuyo precio sea inferior o igual a 50.00 euros (precio <= 50.00), incorporando obligatoriamente
+la cláusula WITH CHECK OPTION.*/
+CREATE VIEW tienda_informatica.v_articulos_gama_baja AS
+SELECT *
+FROM tienda_informatica.articulos
+WHERE precio <= 50.00
+WITH CHECK OPTION;
+
+/*Tarea 4.2*/
+/*Demostración técnica: Razona y demuestra técnicamente qué sucede si el administrador o un usuario con permisos intenta realizar una inserción de un artículo con un precio de 75.00 euros a través de dicha vista.*/
+
+INSERT INTO tienda_informatica.v_articulos_gama_baja (nombre, precio)
+VALUES ('Monitor 24 pulgadas', 75.00);
+
+/* Resultado: ERROR 1369 (HY000): CHECK OPTION failed
+   'tienda_informatica.v_articulos_gama_baja' */
+
+/* Contraprueba con un precio válido */
+INSERT INTO tienda_informatica.v_articulos_gama_baja (nombre, precio)
+VALUES ('Raton USB', 12.50);
+
+/* Resultado: OK, 1 fila insertada */
+
+/*Razonamiento: con WITH CHECK OPTION, MySQL comprueba que cada fila insertada o modificada a través de la vista cumpla el WHERE (precio <= 50.00). 75.00 no lo cumple, así que la operación se cancela y no se escribe nada en la tabla articulos. Afecta también al administrador, porque es una regla de integridad de
+la vista y no un permiso.*/
+
+
+/*Tarea 5*/
+
+/*Tarea 5.1*/
+/*Auditoría de privilegios efectivos: Escribe la sentencia SQL que utilizarías para comprobar los privilegios exactos y los roles activos que tiene asignados en este momento el usuario auditor_externo desde el servidor.*/
+SHOW GRANTS FOR 'auditor_externo'@'%' USING 'rol_consultor';
+
+/*Sentencias complementarias*/
+SELECT * FROM mysql.default_roles WHERE USER = 'auditor_externo';
+SELECT user, host, password_expired, password_last_changed
+FROM mysql.user WHERE user = 'auditor_externo';
+/* Y desde la sesión del propio auditor: SELECT CURRENT_ROLE(); */
+
+/*Tarea 5.2*/
+/*Reflexión sobre el Principio de Mínimo Privilegio.*/
+/*Un usuario de aplicación solo debe tener los permisos que necesita por ejemplo SELECT, INSERT, UPDATE y DELETE sobre ciertas tablas. 
+
+Dar ALL PRIVILEGES es peligroso porque:
+ - Si hay una inyección SQL, el atacante ejecuta las consultas con los permisos de la cuenta de la aplicación. Con ALL PRIVILEGES podría hacer DROP TABLE, DROP DATABASE, crear usuarios o leer ficheros 
+y llegar a comprometer el servidor.
+
+/*Tarea 5.3*/
+/*Análisis de comportamiento del CHECK OPTION.*/
+/*Sin WITH CHECK OPTION, la vista deja de validar lo que se escribe a través de ella:
+ - Se podría insertar un artículo de 75.00 euros mediante v_articulos_gama_baja. 
+ La fila se guardaría en articulos, pero la vista no la mostraría (no cumple precio <= 50.00), y quien la insertó la vería desaparecer.
+ - Se podría actualizar un precio de 30 a 200 euros a través de la vista, y el registro saldría de la vista aunque siga en la tabla base.
+Esto es una inconsistencia lógica: la vista, que solo debe representar la gama baja, permitiría meter en la tabla datos que contradicen su definición, rompiendo
+la integridad del dominio y generando datos erróneos en informes.
+El argumento del rendimiento no se sostiene: la comprobación solo se ejecuta en
+INSERT y UPDATE, nunca en SELECT, y es una simple comparación por fila, con un coste despreciable frente al riesgo de corromper datos.*/
